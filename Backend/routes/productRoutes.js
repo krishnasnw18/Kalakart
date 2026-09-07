@@ -12,6 +12,11 @@ router.post("/", async (req, res) => {
             descriptionEnglish,
             descriptionHindi,
             material,
+            color,
+            design,
+            technique,
+            features,
+            keywords,
             rawMaterialCost,
             price,
             imageUrl,
@@ -30,7 +35,15 @@ router.post("/", async (req, res) => {
             category,
             descriptionEnglish: descriptionEnglish || "",
             descriptionHindi: descriptionHindi || "",
+
+            // Structured AI product information
             material: material || "",
+            color: color || "",
+            design: design || "",
+            technique: technique || "",
+            features: Array.isArray(features) ? features : [],
+            keywords: Array.isArray(keywords) ? keywords : [],
+
             rawMaterialCost: rawMaterialCost || 0,
             price: price || 0,
             imageUrl: imageUrl || "",
@@ -86,6 +99,7 @@ router.get("/", async (req, res) => {
         });
     }
 });
+
 // Get one product by ID
 router.get("/:id", async (req, res) => {
     try {
@@ -119,6 +133,7 @@ router.get("/:id", async (req, res) => {
         });
     }
 });
+
 // Delete a product
 router.delete("/:id", async (req, res) => {
     try {
@@ -152,4 +167,5 @@ router.delete("/:id", async (req, res) => {
         });
     }
 });
+
 module.exports = router;

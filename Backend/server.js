@@ -2,28 +2,59 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+
 const { db } = require("./config/firebase");
+const cloudinary = require("./config/cloudinary");
+
 const productRoutes = require("./routes/productRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const enhanceRoutes = require("./routes/enhanceRoutes");
-const cloudinary = require("./config/cloudinary");
+const imageGeminiRoutes = require("./routes/imageGeminiRoutes");
+const voiceDescriptionRoutes = require("./routes/voiceDescriptionRoutes");
 const authRoutes = require("./routes/authRoutes");
+const aiProductRoutes = require("./routes/aiProductRoutes");
+const chatRoutes = require("./routes/chatRoutes");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+// =========================================================
+// AI ROUTES
+// =========================================================
+
+app.use("/api/generate-product", aiProductRoutes);
+app.use("/api/voice-description", voiceDescriptionRoutes);
+app.use("/api/chat", chatRoutes);
+
+// Gemini image enhancement
+app.use("/api/enhance-image-ai", imageGeminiRoutes);
+
+// Existing Cloudinary image enhancement fallback
+app.use("/api/enhance-image", enhanceRoutes);
+
+// =========================================================
+// CORE APP ROUTES
+// =========================================================
+
 app.use("/api/products", productRoutes);
 app.use("/api/upload-image", uploadRoutes);
-app.use("/api/enhance-image", enhanceRoutes);
 app.use("/api/auth", authRoutes);
+
+// =========================================================
+// ROOT
+// =========================================================
 
 app.get("/", (req, res) => {
     res.json({
         message: "Artisan AI Backend is running"
     });
 });
+
+// =========================================================
+// FIREBASE TEST
+// =========================================================
 
 app.get("/test-firebase", async (req, res) => {
     try {
@@ -45,6 +76,10 @@ app.get("/test-firebase", async (req, res) => {
         });
     }
 });
+
+// =========================================================
+// CLOUDINARY TEST
+// =========================================================
 
 app.get("/test-cloudinary", async (req, res) => {
     try {
@@ -70,6 +105,11 @@ app.get("/test-cloudinary", async (req, res) => {
         });
     }
 });
+
+// =========================================================
+// SERVER
+// =========================================================
+
 const PORT = 5000;
 
 app.listen(PORT, () => {
