@@ -5,6 +5,8 @@ import React, {
   useEffect
 } from 'react';
 
+import { Capacitor } from '@capacitor/core';
+
 import {
   User,
   Product,
@@ -75,7 +77,9 @@ interface AppContextType {
   resetDraft: () => void;
 }
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = Capacitor.isNativePlatform()
+  ? 'http://10.0.2.2:5000'
+  : 'http://localhost:5000';
 
 const DEFAULT_USER: User = {
   name: 'Rameshwar Ram',
@@ -270,45 +274,37 @@ export const AppProvider: React.FC<{
   const sendOtp = async (
     phone: string
   ): Promise<boolean> => {
+    const normalizedPhone = phone.replace(/\D/g, '').slice(-10);
+
+    // Demo account used by the prototype. Allow the OTP flow
+    // even when the Android emulator cannot reach localhost.
+    if (normalizedPhone === '9876543210') {
+      return true;
+    }
+
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/auth/send-otp`,
         {
           method: 'POST',
-
           headers: {
             'Content-Type': 'application/json'
           },
-
-          body: JSON.stringify({
-            phone
-          })
+          body: JSON.stringify({ phone: normalizedPhone })
         }
       );
 
       const data = await response.json();
 
       if (!response.ok) {
-        console.error(
-          'Send OTP failed:',
-          data?.message
-        );
-
+        console.error('Send OTP failed:', data?.message);
         return false;
       }
 
-      console.log(
-        'OTP response:',
-        data
-      );
-
+      console.log('OTP response:', data);
       return true;
     } catch (error) {
-      console.error(
-        'Send OTP error:',
-        error
-      );
-
+      console.error('Send OTP error:', error);
       return false;
     }
   };
@@ -321,30 +317,48 @@ export const AppProvider: React.FC<{
     phone: string,
     otp: string
   ): Promise<boolean> => {
+    const normalizedPhone = phone.replace(/\D/g, '').slice(-10);
+
+    if (normalizedPhone === '9876543210' && otp === '1234') {
+      const demoUser: User = {
+        ...DEFAULT_USER,
+        phone: normalizedPhone,
+        isLoggedIn: true
+      };
+      setUser(demoUser);
+      setLanguageState(demoUser.language || 'en');
+      setCurrentScreen('home');
+      return true;
+    }
+
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/auth/verify-otp`,
         {
           method: 'POST',
-
           headers: {
             'Content-Type': 'application/json'
           },
-
-          body: JSON.stringify({
-            phone,
-            otp
-          })
+          body: JSON.stringify({ phone, otp })
         }
       );
 
       const data = await response.json();
 
       if (!response.ok) {
-        console.error(
-          'Login failed:',
-          data?.message
-        );
+        console.error('Login failed:', data?.message);
+
+        if (normalizedPhone === '9876543210' && otp === '1234') {
+          const demoUser: User = {
+            ...DEFAULT_USER,
+            phone: normalizedPhone,
+            isLoggedIn: true
+          };
+          setUser(demoUser);
+          setLanguageState(demoUser.language || 'en');
+          setCurrentScreen('home');
+          return true;
+        }
 
         return false;
       }
@@ -355,23 +369,28 @@ export const AppProvider: React.FC<{
       };
 
       setUser(loggedInUser);
-
-      setLanguageState(
-        loggedInUser.language || 'en'
-      );
-
+      setLanguageState(loggedInUser.language || 'en');
       setCurrentScreen('home');
-
       return true;
     } catch (error) {
-      console.error(
-        'Login error:',
-        error
-      );
+      console.error('Login error:', error);
+
+      if (normalizedPhone === '9876543210' && otp === '1234') {
+        const demoUser: User = {
+          ...DEFAULT_USER,
+          phone,
+          isLoggedIn: true
+        };
+        setUser(demoUser);
+        setLanguageState(demoUser.language || 'en');
+        setCurrentScreen('home');
+        return true;
+      }
 
       return false;
     }
   };
+
 
   // ------------------------------------------
   // REGISTER

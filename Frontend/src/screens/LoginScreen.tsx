@@ -205,18 +205,26 @@ export const LoginScreen: React.FC = () => {
           style={{
             width: '72px',
             height: '72px',
-            background:
-              'linear-gradient(135deg, #3C6E71 0%, #3C6E71 100%)',
             borderRadius: '24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '36px',
+            overflow: 'hidden',
+            position: 'relative',
             margin: '0 auto 12px',
             boxShadow: '0 8px 24px rgba(60, 110, 113, 0.3)'
           }}
         >
-          🪔
+          <img
+            src="/kalakart-logo.jpeg"
+            alt="Kalakart logo"
+            style={{
+              position: 'absolute',
+              width: '100px',
+              height: 'auto',
+              top: '0',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              maxWidth: 'none'
+            }}
+          />
         </div>
 
         <h1

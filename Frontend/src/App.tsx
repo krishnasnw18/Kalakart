@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
-import { PhoneContainer } from './components/PhoneContainer';
+import PhoneContainer from './components/PhoneContainer';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { ChatBot } from './components/ChatBot';
@@ -55,7 +55,6 @@ const KalakartSplashScreen: React.FC<{ onFinish: () => void }> = ({
 const MainScreenRouter: React.FC = () => {
   const { currentScreen, user } = useApp();
 
-  // MUST start on Login screen if not logged in
   if (!user.isLoggedIn) {
     return <LoginScreen />;
   }
@@ -98,7 +97,6 @@ const MainScreenRouter: React.FC = () => {
 
       <BottomNav />
 
-      {/* AI Sahayak is available throughout the logged-in app */}
       <ChatBot />
     </>
   );
@@ -121,5 +119,3 @@ export const App: React.FC = () => {
 };
 
 export default App;
-
-

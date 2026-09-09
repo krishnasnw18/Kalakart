@@ -78,7 +78,7 @@ export const MyProductsScreen: React.FC = () => {
 
     try {
       const response = await fetch(
-        'http://localhost:5000/api/products'
+        'http://10.0.2.2:5000/api/products'
       );
 
       const data = await response.json();

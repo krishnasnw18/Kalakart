@@ -1,6 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { SpeechRecognition } from '@capgo/capacitor-speech-recognition';
 import { useApp } from '../context/AppContext';
 import { CATEGORIES } from '../data/sampleData';
+
+const API_BASE_URL = Capacitor.isNativePlatform()
+  ? 'http://10.0.2.2:5000'
+  : 'http://localhost:5000';
 
 import {
   Camera,
@@ -123,7 +129,7 @@ export const AddProductWizard: React.FC = () => {
       formData.append('image', file);
 
       const response = await fetch(
-        'http://localhost:5000/api/upload-image',
+        `${API_BASE_URL}/api/upload-image`,
         {
           method: 'POST',
           body: formData
@@ -159,19 +165,136 @@ export const AddProductWizard: React.FC = () => {
   };
 
   // =========================================================
-  // REAL VOICE RECORDING
+  // VOICE INPUT
+  // Android uses native SpeechRecognition. Browser uses MediaRecorder.
   // =========================================================
 
-  const handleVoiceInput = async () => {
-    setVoiceSuccessAlert(false);
-    setVoiceError('');
+  const speechListenerRef =
+    useRef<{ remove: () => Promise<void> } | null>(null);
 
-    // Stop the current recording
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      return;
+  const nativeTranscriptRef = useRef('');
+
+  const handleNativeAndroidVoice = async () => {
+    const recognitionLanguage =
+      language === 'hi' ? 'hi-IN' : 'en-IN';
+
+    try {
+      const permissionStatus =
+        await SpeechRecognition.requestPermissions();
+
+      if (permissionStatus.speechRecognition !== 'granted') {
+        throw new Error('Microphone permission was not granted.');
+      }
+
+      const { available } = await SpeechRecognition.available();
+
+      if (!available) {
+        throw new Error('Speech recognition is not available on this device.');
+      }
+
+      if (speechListenerRef.current) {
+        await speechListenerRef.current.remove();
+        speechListenerRef.current = null;
+      }
+
+      nativeTranscriptRef.current = '';
+      setIsListening(true);
+
+      speechListenerRef.current =
+        await SpeechRecognition.addListener('partialResults', event => {
+          const accumulated =
+            event.accumulatedText?.trim() ||
+            event.accumulated?.trim() ||
+            event.matches?.[0]?.trim() ||
+            '';
+
+          if (accumulated) {
+            nativeTranscriptRef.current = accumulated;
+          }
+        });
+
+      await SpeechRecognition.start({
+        language: recognitionLanguage,
+        maxResults: 3,
+        partialResults: true,
+        popup: false,
+        useOnDeviceRecognition: false
+      });
+    } catch (error) {
+      console.error('Native speech start error:', error);
+      setIsListening(false);
+
+      if (speechListenerRef.current) {
+        await speechListenerRef.current.remove();
+        speechListenerRef.current = null;
+      }
+
+      setVoiceError(
+        language === 'en'
+          ? error instanceof Error ? error.message : 'Could not start voice recognition. Please try again.'
+          : 'वॉइस पहचान शुरू नहीं हो सकी। कृपया फिर से प्रयास करें।'
+      );
     }
+  };
 
+  const stopNativeAndroidVoice = async () => {
+    try {
+      setIsVoiceProcessing(true);
+      await SpeechRecognition.stop();
+      await new Promise(resolve => setTimeout(resolve, 250));
+
+      let transcript = nativeTranscriptRef.current.trim();
+
+      try {
+        const last = await SpeechRecognition.getLastPartialResult();
+        transcript =
+          last.text?.trim() ||
+          last.matches?.[0]?.trim() ||
+          transcript;
+      } catch {
+        // Keep accumulated transcript when final partial result is unavailable.
+      }
+
+      if (speechListenerRef.current) {
+        await speechListenerRef.current.remove();
+        speechListenerRef.current = null;
+      }
+
+      nativeTranscriptRef.current = '';
+      setIsListening(false);
+
+      if (!transcript) {
+        throw new Error('No useful speech was detected.');
+      }
+
+      setDraftProduct(prev => ({
+        ...prev,
+        rawDescription: transcript,
+        voiceInputUsed: true
+      }));
+
+      setVoiceSuccessAlert(true);
+    } catch (error) {
+      console.error('Native speech stop error:', error);
+      setIsListening(false);
+      nativeTranscriptRef.current = '';
+
+      if (speechListenerRef.current) {
+        await speechListenerRef.current.remove();
+        speechListenerRef.current = null;
+      }
+
+      setVoiceError(
+        language === 'en'
+          ? error instanceof Error ? error.message : 'Could not process your voice. Please try again.'
+          : 'आपकी आवाज़ संसाधित नहीं हो सकी। कृपया फिर से प्रयास करें।'
+      );
+    } finally {
+      setIsVoiceProcessing(false);
+    }
+  };
+
+  const handleBrowserVoiceInput = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setVoiceError(
         language === 'en'
@@ -190,25 +313,25 @@ export const AddProductWizard: React.FC = () => {
       return;
     }
 
+    let stream: MediaStream | null = null;
+
     try {
-      const stream =
-        await navigator.mediaDevices.getUserMedia({
-          audio: true
-        });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      const preferredMimeType =
-        MediaRecorder.isTypeSupported(
-          'audio/webm;codecs=opus'
-        )
-          ? 'audio/webm;codecs=opus'
-          : MediaRecorder.isTypeSupported('audio/webm')
-            ? 'audio/webm'
-            : '';
+      const supportedMimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/m4a'
+      ];
 
-      const recorder = preferredMimeType
-        ? new MediaRecorder(stream, {
-            mimeType: preferredMimeType
-          })
+      const mimeType =
+        supportedMimeTypes.find(type =>
+          MediaRecorder.isTypeSupported(type)
+        ) || '';
+
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
         : new MediaRecorder(stream);
 
       audioChunksRef.current = [];
@@ -216,7 +339,7 @@ export const AddProductWizard: React.FC = () => {
       setIsListening(true);
 
       recorder.ondataavailable = event => {
-        if (event.data && event.data.size > 0) {
+        if (event.data?.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
@@ -224,17 +347,10 @@ export const AddProductWizard: React.FC = () => {
       recorder.onstop = async () => {
         setIsListening(false);
         mediaRecorderRef.current = null;
+        stream?.getTracks().forEach(track => track.stop());
 
-        stream.getTracks().forEach(track => track.stop());
-
-        const mimeType =
-          recorder.mimeType || 'audio/webm';
-
-        const audioBlob = new Blob(
-          audioChunksRef.current,
-          { type: mimeType }
-        );
-
+        const actualMimeType = recorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
         audioChunksRef.current = [];
 
         if (audioBlob.size === 0) {
@@ -250,128 +366,58 @@ export const AddProductWizard: React.FC = () => {
 
         try {
           const extension =
-            mimeType.includes('mp4') ||
-            mimeType.includes('m4a')
+            actualMimeType.includes('mp4') || actualMimeType.includes('m4a')
               ? 'm4a'
               : 'webm';
 
           const formData = new FormData();
-
-          formData.append(
-            'audio',
-            audioBlob,
-            `Kalakart-voice.${extension}`
-          );
-
-          formData.append(
-            'language',
-            language
-          );
-
-          formData.append(
-            'category',
-            draftProduct.category || ''
-          );
+          formData.append('audio', audioBlob, `Kalakart-voice.${extension}`);
+          formData.append('language', language);
+          formData.append('category', draftProduct.category || '');
 
           const voiceResponse = await fetch(
-            'http://localhost:5000/api/voice-description',
-            {
-              method: 'POST',
-              body: formData
-            }
+            `${API_BASE_URL}/api/voice-description`,
+            { method: 'POST', body: formData }
           );
 
-          const voiceData =
-            await voiceResponse.json();
+          const voiceData = await voiceResponse.json();
 
-          if (
-            !voiceResponse.ok ||
-            !voiceData.success ||
-            !voiceData.data
-          ) {
-            throw new Error(
-              voiceData.message ||
-                'Voice processing failed.'
-            );
+          if (!voiceResponse.ok || !voiceData?.success || !voiceData?.data) {
+            throw new Error(voiceData?.message || 'Voice processing failed.');
           }
 
-          const voiceResult = voiceData.data;
-
+          const result = voiceData.data;
           const transcript =
-            voiceResult.transcript ||
-            voiceResult.translatedEnglish ||
-            voiceResult.productDescriptionEnglish ||
+            result.transcript ||
+            result.translatedEnglish ||
+            result.productDescriptionEnglish ||
             '';
 
           if (!transcript.trim()) {
-            throw new Error(
-              'No useful speech was detected.'
-            );
+            throw new Error('No useful speech was detected.');
           }
 
-          // Use the complete result returned by the voice endpoint.
-          // This avoids a second Gemini request after every recording.
           setDraftProduct(prev => ({
             ...prev,
             rawDescription: transcript,
             voiceInputUsed: true,
-            category:
-              prev.category ||
-              voiceResult.category ||
-              prev.category,
-            aiTitleEn:
-              voiceResult.title ||
-              prev.aiTitleEn,
-            aiDescriptionEn:
-              voiceResult.productDescriptionEnglish ||
-              prev.aiDescriptionEn,
-            aiDescriptionHi:
-              voiceResult.productDescriptionHindi ||
-              prev.aiDescriptionHi,
-            material:
-              voiceResult.material ||
-              prev.material ||
-              '',
-            color:
-              voiceResult.color ||
-              prev.color ||
-              '',
-            design:
-              voiceResult.design ||
-              prev.design ||
-              '',
-            technique:
-              voiceResult.technique ||
-              prev.technique ||
-              '',
-            features:
-              Array.isArray(voiceResult.features)
-                ? voiceResult.features
-                : prev.features || [],
-            keywords:
-              Array.isArray(voiceResult.keywords)
-                ? voiceResult.keywords
-                : prev.keywords
+            aiTitleEn: result.title || prev.aiTitleEn,
+            aiDescriptionEn: result.productDescriptionEnglish || prev.aiDescriptionEn,
+            aiDescriptionHi: result.productDescriptionHindi || prev.aiDescriptionHi,
+            material: result.material || prev.material || '',
+            color: result.color || prev.color || '',
+            design: result.design || prev.design || '',
+            technique: result.technique || prev.technique || '',
+            features: Array.isArray(result.features) ? result.features : prev.features || [],
+            keywords: Array.isArray(result.keywords) ? result.keywords : prev.keywords || []
           }));
 
           setVoiceSuccessAlert(true);
-
-          // Automatically continue to the next step after
-          // successful voice processing.
-          setCurrentStep(3);
-          setDraftProduct(prev => ({
-            ...prev,
-            step: 3
-          }));
         } catch (error) {
-          console.error(
-            'Voice AI error:',
-            error
-          );
-
+          console.error('Voice AI error:', error);
           setVoiceError(
             language === 'en'
-              ? 'Could not process your voice. Please try again.'
+              ? error instanceof Error ? error.message : 'Could not process your voice. Please try again.'
               : 'आपकी आवाज़ संसाधित नहीं हो सकी। कृपया फिर से प्रयास करें।'
           );
         } finally {
@@ -380,21 +426,51 @@ export const AddProductWizard: React.FC = () => {
       };
 
       recorder.start();
-    } catch (error) {
-      console.error(
-        'Microphone access error:',
-        error
-      );
+    } catch (error: any) {
+      console.error('Microphone access error:', error);
+      stream?.getTracks().forEach(track => track.stop());
+      mediaRecorderRef.current = null;
+      setIsListening(false);
+
+      const name = error?.name || '';
+      const message =
+        name === 'NotAllowedError' || name === 'SecurityError'
+          ? 'Microphone access was blocked. Allow microphone access and try again.'
+          : name === 'NotFoundError'
+            ? 'No microphone was found on this device.'
+            : name === 'NotReadableError' || name === 'AbortError'
+              ? 'The microphone is busy or unavailable. Close other apps using the microphone and try again.'
+              : error?.message || 'Could not access the microphone. Please try again.';
 
       setVoiceError(
         language === 'en'
-          ? 'Microphone permission was denied or unavailable.'
-          : 'माइक्रोफ़ोन अनुमति अस्वीकार कर दी गई या उपलब्ध नहीं है।'
+          ? message
+          : 'माइक्रोफ़ोन एक्सेस नहीं हो सका। कृपया फिर से प्रयास करें।'
       );
-
-      setIsListening(false);
-      mediaRecorderRef.current = null;
     }
+  };
+
+  const handleVoiceInput = async () => {
+    setVoiceSuccessAlert(false);
+    setVoiceError('');
+
+    const isAndroidApp = Capacitor.getPlatform() === 'android';
+
+    if (isAndroidApp) {
+      if (isListening) {
+        await stopNativeAndroidVoice();
+      } else {
+        await handleNativeAndroidVoice();
+      }
+      return;
+    }
+
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      return;
+    }
+
+    await handleBrowserVoiceInput();
   };
 
   useEffect(() => {
@@ -448,31 +524,103 @@ export const AddProductWizard: React.FC = () => {
         .filter(Boolean)
         .join('\n');
 
-      const response = await fetch(
-        'http://localhost:5000/api/generate-product',
-        {
-          method: 'POST',
+      let status = 0;
+      let data: any = null;
+
+      if (Capacitor.isNativePlatform()) {
+        // Android: use Capacitor's native HTTP client so the request does
+        // not depend on WebView fetch/CORS behavior.
+        const response = await CapacitorHttp.post({
+          url: `${API_BASE_URL}/api/generate-product`,
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            Accept: 'application/json'
           },
-          body: JSON.stringify({
+          data: {
             productInput
-          })
+          }
+        });
+
+        status = response.status;
+        data = response.data;
+      } else {
+        // Browser: keep the normal fetch path.
+        const response = await fetch(
+          `${API_BASE_URL}/api/generate-product`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json'
+            },
+            body: JSON.stringify({
+              productInput
+            })
+          }
+        );
+
+        status = response.status;
+
+        const responseText = await response.text();
+
+        if (responseText.trim()) {
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            throw new Error(
+              `Backend returned an invalid response (HTTP ${response.status}).`
+            );
+          }
         }
-      );
+      }
 
-      const data = await response.json();
+      if (status < 200 || status >= 300) {
+        const backendMessage =
+          data?.message ||
+          data?.error ||
+          data?.details ||
+          `HTTP ${status}`;
 
-      if (!response.ok || !data.success || !data.data) {
+        if (status === 429) {
+          throw new Error(
+            `Gemini rate limit or quota reached. ${backendMessage}`
+          );
+        }
+
+        if (status === 401 || status === 403) {
+          throw new Error(
+            `Gemini API authorization failed. ${backendMessage}`
+          );
+        }
+
+        if (status === 404) {
+          throw new Error(
+            'The /api/generate-product endpoint was not found. Make sure the backend is running with the current routes.'
+          );
+        }
+
+        if (status >= 500) {
+          throw new Error(
+            `Backend AI service failed (HTTP ${status}). ${backendMessage}`
+          );
+        }
+
         throw new Error(
-          data.message || 'Gemini could not generate product information.'
+          `Product AI request failed. ${backendMessage}`
+        );
+      }
+
+      if (!data?.success || !data?.data) {
+        throw new Error(
+          data?.message ||
+            data?.error ||
+            'The backend did not return valid product information.'
         );
       }
 
       const aiProduct = data.data;
 
       // Keep the existing local pricing formula for now.
-      // The real dynamic-pricing API can replace this later.
       const cost = draftProduct.rawMaterialCost || 500;
       const minPrice = Math.round(cost * 1.5);
       const maxPrice = Math.round(cost * 2.2);
@@ -497,7 +645,7 @@ export const AddProductWizard: React.FC = () => {
           : prev.features || [],
         keywords: Array.isArray(aiProduct.keywords)
           ? aiProduct.keywords
-          : prev.keywords,
+          : prev.keywords || [],
         marketPriceRange: {
           min: minPrice,
           max: maxPrice
@@ -511,15 +659,17 @@ export const AddProductWizard: React.FC = () => {
 
       return true;
     } catch (error) {
-      console.error(
-        'Gemini product generation error:',
-        error
-      );
+      console.error('Gemini product generation error:', error);
+
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Unknown error while contacting the product AI service.';
 
       setAiCatalogError(
         language === 'en'
-          ? 'AI could not generate the product details. Please try again.'
-          : 'AI उत्पाद विवरण तैयार नहीं कर सका। कृपया फिर से प्रयास करें।'
+          ? errorMessage
+          : `AI उत्पाद विवरण तैयार नहीं कर सका। ${errorMessage}`
       );
 
       return false;
@@ -547,7 +697,7 @@ export const AddProductWizard: React.FC = () => {
     }
 
     const response = await fetch(
-      'http://localhost:5000/api/products',
+      `${API_BASE_URL}/api/products`,
       {
         method: 'POST',
         headers: {
@@ -695,11 +845,12 @@ export const AddProductWizard: React.FC = () => {
 
   return (
     <div
-      className="app-screen-container"
-      style={{
-        padding: '16px'
-      }}
-    >
+  className="app-screen-container"
+  style={{
+    padding: '16px',
+    paddingBottom: '120px'
+  }}
+>
       {/* =====================================================
           HEADER
       ===================================================== */}
@@ -724,7 +875,7 @@ export const AddProductWizard: React.FC = () => {
             style={{
               background: 'none',
               border: 'none',
-              color: '#3C6E71',
+              color: '#c85a32',
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
@@ -764,7 +915,7 @@ export const AddProductWizard: React.FC = () => {
                 borderRadius: '4px',
                 background:
                   step <= currentStep
-                    ? 'linear-gradient(90deg, #3C6E71, #3C6E71)'
+                    ? 'linear-gradient(90deg, #c85a32, #d97706)'
                     : '#e8ded5'
               }}
             />
@@ -782,7 +933,7 @@ export const AddProductWizard: React.FC = () => {
             style={{
               fontSize: '20px',
               marginBottom: '6px',
-              color: '#3C6E71'
+              color: '#c85a32'
             }}
           >
             {t('step1Title')}
@@ -865,14 +1016,14 @@ export const AddProductWizard: React.FC = () => {
                 >
                   <Upload
                     size={28}
-                    color="#3C6E71"
+                    color="#c85a32"
                   />
 
                   <span
                     style={{
                       fontSize: '13px',
                       fontWeight: 700,
-                      color: '#3C6E71'
+                      color: '#c85a32'
                     }}
                   >
                     {language === 'en'
@@ -902,7 +1053,7 @@ export const AddProductWizard: React.FC = () => {
               >
                 <Camera
                   size={18}
-                  color="#3C6E71"
+                  color="#c85a32"
                 />
                 <span>{t('takePhoto')}</span>
 
@@ -928,7 +1079,7 @@ export const AddProductWizard: React.FC = () => {
               >
                 <Upload
                   size={18}
-                  color="#3C6E71"
+                  color="#c85a32"
                 />
                 <span>
                   {t('uploadGallery')}
@@ -1029,7 +1180,7 @@ export const AddProductWizard: React.FC = () => {
             style={{
               fontSize: '20px',
               marginBottom: '6px',
-              color: '#3C6E71'
+              color: '#c85a32'
             }}
           >
             {t('step2Title')}
@@ -1163,7 +1314,7 @@ export const AddProductWizard: React.FC = () => {
                 background: '#fef3c7',
                 borderRadius: '12px',
                 border:
-                  '1px solid #3C6E71'
+                  '1px solid #f59e0b'
               }}
             >
               <label
@@ -1199,7 +1350,7 @@ export const AddProductWizard: React.FC = () => {
                   borderColor:
                     isListening
                       ? '#ef4444'
-                      : '#3C6E71',
+                      : '#d97706',
                   color:
                     isListening
                       ? '#b91c1c'
@@ -1367,7 +1518,7 @@ export const AddProductWizard: React.FC = () => {
             style={{
               fontSize: '20px',
               marginBottom: '6px',
-              color: '#3C6E71'
+              color: '#c85a32'
             }}
           >
             {language === 'en'
@@ -1459,7 +1610,7 @@ export const AddProductWizard: React.FC = () => {
             style={{
               fontSize: '20px',
               marginBottom: '6px',
-              color: '#3C6E71'
+              color: '#c85a32'
             }}
           >
             {t('step4Title')}
@@ -1502,7 +1653,7 @@ export const AddProductWizard: React.FC = () => {
                 style={{
                   border: 'none',
                   background: 'none',
-                  color: '#3C6E71',
+                  color: '#c85a32',
                   fontWeight: 600,
                   cursor: 'pointer',
                   display: 'flex',
@@ -1817,7 +1968,7 @@ export const AddProductWizard: React.FC = () => {
             style={{
               fontSize: '20px',
               marginBottom: '6px',
-              color: '#3C6E71'
+              color: '#c85a32'
             }}
           >
             {t('step5Title')}
@@ -1919,7 +2070,7 @@ export const AddProductWizard: React.FC = () => {
                 textAlign: 'center',
                 marginTop: '16px',
                 border:
-                  '2px solid #3C6E71'
+                  '2px solid #f59e0b'
               }}
             >
               <div
@@ -1939,7 +2090,7 @@ export const AddProductWizard: React.FC = () => {
                 style={{
                   fontSize: '32px',
                   fontWeight: 800,
-                  color: '#3C6E71',
+                  color: '#c85a32',
                   margin: '5px 0'
                 }}
               >
@@ -2067,7 +2218,7 @@ export const AddProductWizard: React.FC = () => {
             style={{
               fontSize: '20px',
               marginBottom: '6px',
-              color: '#3C6E71'
+              color: '#c85a32'
             }}
           >
             {t('step6Title')}
@@ -2149,7 +2300,7 @@ export const AddProductWizard: React.FC = () => {
                 style={{
                   fontSize: '24px',
                   fontWeight: 800,
-                  color: '#3C6E71',
+                  color: '#c85a32',
                   margin: '10px 0'
                 }}
               >
@@ -2232,4 +2383,3 @@ export const AddProductWizard: React.FC = () => {
     </div>
   );
 };
-

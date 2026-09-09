@@ -1,43 +1,61 @@
-import React, { useState } from 'react';
-import { Smartphone, Maximize2, Minimize2 } from 'lucide-react';
+import React from 'react';
+import { Capacitor } from '@capacitor/core';
 
 interface PhoneContainerProps {
   children: React.ReactNode;
 }
 
-export const PhoneContainer: React.FC<PhoneContainerProps> = ({ children }) => {
-  const [isFullScreen, setIsFullScreen] = useState(false);
+const PhoneContainer: React.FC<PhoneContainerProps> = ({ children }) => {
+  const isAndroidApp = Capacitor.isNativePlatform();
 
   return (
-    <div className="app-viewport-wrapper">
-      <button 
-        className="view-toggle-btn"
-        onClick={() => setIsFullScreen(!isFullScreen)}
-        title="Toggle Phone Frame View"
+    <div
+      className="app-viewport-wrapper"
+      style={
+        isAndroidApp
+          ? {
+              width: '100vw',
+              height: '100dvh',
+              minHeight: '100dvh',
+              padding: 0,
+              margin: 0,
+              display: 'flex',
+              alignItems: 'stretch',
+              justifyContent: 'stretch',
+              overflow: 'hidden'
+            }
+          : undefined
+      }
+    >
+      <div
+        className={`mobile-phone-frame${isAndroidApp ? ' full-view' : ''}`}
+        style={
+          isAndroidApp
+            ? {
+                width: '100%',
+                maxWidth: 'none',
+                height: '100dvh',
+                maxHeight: '100dvh',
+                minHeight: 0,
+                margin: 0,
+                borderRadius: 0,
+                border: 'none',
+                boxShadow: 'none',
+                overflow: 'hidden'
+              }
+            : undefined
+        }
       >
-        {isFullScreen ? (
-          <>
-            <Smartphone size={16} />
-            <span>Mobile Frame</span>
-          </>
-        ) : (
-          <>
-            <Maximize2 size={16} />
-            <span>Expand Screen</span>
-          </>
-        )}
-      </button>
-
-      <div className={`mobile-phone-frame ${isFullScreen ? 'full-view' : ''}`}>
-        {!isFullScreen && (
+        {!isAndroidApp && (
           <div className="phone-notch">
-            <div className="phone-camera"></div>
+            <div className="phone-camera" />
           </div>
         )}
+
         {children}
       </div>
     </div>
   );
 };
 
-
+export default PhoneContainer;

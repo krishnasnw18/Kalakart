@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">ShilpAura</string>
-    <string name="title_activity_main">ShilpAura</string>
+    <string name="app_name">Kalakart</string>
+    <string name="title_activity_main">Kalakart</string>
     <string name="package_name">com.shilpaura.app</string>
     <string name="custom_url_scheme">com.shilpaura.app</string>
 </resources>
